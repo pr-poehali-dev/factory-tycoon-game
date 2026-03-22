@@ -65,7 +65,9 @@ function createDispenser(level: number): Dispenser {
   };
 }
 
-const initState: GameState = {
+const SAVE_KEY = "factory_tycoon_save";
+
+const defaultState: GameState = {
   balance: 0,
   buildings: [
     {
@@ -80,6 +82,33 @@ const initState: GameState = {
   totalEarned: 0,
   nextDispenserLevel: 1,
 };
+
+function loadGame(): GameState {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return defaultState;
+    const saved = JSON.parse(raw) as GameState;
+    // Сбрасываем lastFired чтобы таймеры не были из прошлого
+    const now = Date.now();
+    saved.buildings = saved.buildings.map((b) => ({
+      ...b,
+      dispensers: b.dispensers.map((d) => ({ ...d, lastFired: now })),
+    }));
+    return saved;
+  } catch (e) {
+    return defaultState;
+  }
+}
+
+function saveGame(state: GameState) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn("Save failed", e);
+  }
+}
+
+const initState = loadGame();
 
 // ==================== УТИЛИТЫ ====================
 function formatMoney(n: number): string {
@@ -403,6 +432,29 @@ export default function Index() {
     setTimeout(() => setNotification(null), 2500);
   }, []);
 
+  // Автосохранение каждые 5 секунд
+  useEffect(() => {
+    const interval = setInterval(() => {
+      saveGame(gameRef.current);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Сохранение при уходе со страницы
+  useEffect(() => {
+    const onUnload = () => saveGame(gameRef.current);
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, []);
+
+  const resetGame = useCallback(() => {
+    if (!confirm("Сбросить весь прогресс? Это действие необратимо.")) return;
+    localStorage.removeItem(SAVE_KEY);
+    setGame(defaultState);
+    setSelectedBuildingId(1);
+    showNotif("Игра сброшена. Начинаем заново!");
+  }, [showNotif]);
+
   // Игровой цикл
   useEffect(() => {
     const tick = setInterval(() => {
@@ -547,7 +599,7 @@ export default function Index() {
         </div>
 
         {/* Мини-статы */}
-        <div className="flex gap-5">
+        <div className="flex gap-5 items-center">
           {[
             { icon: "🏭", label: "Заводов", value: game.buildings.length, color: "#3b82f6" },
             { icon: "⚙️", label: "Раздатчиков", value: totalDispensers, color: "#a855f7" },
@@ -558,6 +610,17 @@ export default function Index() {
               <div className="font-oswald font-bold text-sm" style={{ color: s.color }}>{s.value}</div>
             </div>
           ))}
+          <div className="flex flex-col items-center gap-1 ml-2">
+            <div className="text-[8px] font-mono" style={{ color: "#22c55e66" }}>💾 авто</div>
+            <button
+              onClick={resetGame}
+              className="text-[9px] font-mono px-2 py-0.5 rounded transition-all hover:opacity-80"
+              style={{ color: "#ef444488", border: "1px solid #ef444822", background: "transparent" }}
+              title="Сбросить прогресс"
+            >
+              сброс
+            </button>
+          </div>
         </div>
       </header>
 
