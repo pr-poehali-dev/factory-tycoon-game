@@ -610,17 +610,7 @@ export default function Index() {
               <div className="font-oswald font-bold text-sm" style={{ color: s.color }}>{s.value}</div>
             </div>
           ))}
-          <div className="flex flex-col items-center gap-1 ml-2">
-            <div className="text-[8px] font-mono" style={{ color: "#22c55e66" }}>💾 авто</div>
-            <button
-              onClick={resetGame}
-              className="text-[9px] font-mono px-2 py-0.5 rounded transition-all hover:opacity-80"
-              style={{ color: "#ef444488", border: "1px solid #ef444822", background: "transparent" }}
-              title="Сбросить прогресс"
-            >
-              сброс
-            </button>
-          </div>
+          <div className="text-[8px] font-mono ml-2" style={{ color: "#22c55e55" }}>💾 авто</div>
         </div>
       </header>
 
