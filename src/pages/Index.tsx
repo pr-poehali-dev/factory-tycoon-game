@@ -83,32 +83,59 @@ const defaultState: GameState = {
   nextDispenserLevel: 1,
 };
 
-function loadGame(): GameState {
+const MAX_OFFLINE_MS = 2 * 60 * 60 * 1000; // 2 часа
+
+function getConveyorIntervalRaw(dispSpeedLevel: number, convSpeedLevel: number): number {
+  const dMult = DISPENSER_SPEED_UPGRADES[Math.min(dispSpeedLevel - 1, 4)].multiplier;
+  const cMult = CONVEYOR_SPEED_UPGRADES[Math.min(convSpeedLevel - 1, 4)].multiplier;
+  return CONVEYOR_INTERVAL_BASE / (dMult * cMult);
+}
+
+function loadGame(): { state: GameState; offlineEarned: number } {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return defaultState;
-    const saved = JSON.parse(raw) as GameState;
-    // Сбрасываем lastFired чтобы таймеры не были из прошлого
+    if (!raw) return { state: defaultState, offlineEarned: 0 };
+    const saved = JSON.parse(raw) as GameState & { savedAt?: number };
     const now = Date.now();
+
+    // Офлайн-заработок
+    let offlineEarned = 0;
+    const savedAt = saved.savedAt ?? now;
+    const offlineMs = Math.min(now - savedAt, MAX_OFFLINE_MS);
+
+    if (offlineMs > 1000) {
+      const interval = getConveyorIntervalRaw(saved.dispenserSpeedLevel, saved.conveyorSpeedLevel);
+      const cycles = Math.floor(offlineMs / interval);
+      saved.buildings.forEach((b) => {
+        b.dispensers.forEach((d) => {
+          offlineEarned += d.income * cycles;
+        });
+      });
+      saved.balance += offlineEarned;
+      saved.chestBalance += offlineEarned;
+      saved.totalEarned += offlineEarned;
+    }
+
     saved.buildings = saved.buildings.map((b) => ({
       ...b,
       dispensers: b.dispensers.map((d) => ({ ...d, lastFired: now })),
     }));
-    return saved;
+
+    return { state: saved, offlineEarned };
   } catch (e) {
-    return defaultState;
+    return { state: defaultState, offlineEarned: 0 };
   }
 }
 
 function saveGame(state: GameState) {
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
   } catch (e) {
     console.warn("Save failed", e);
   }
 }
 
-const initState = loadGame();
+const { state: initState, offlineEarned: initOfflineEarned } = loadGame();
 
 // ==================== УТИЛИТЫ ====================
 function formatMoney(n: number): string {
@@ -430,6 +457,16 @@ export default function Index() {
   const showNotif = useCallback((msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 2500);
+  }, []);
+
+  // Уведомление об офлайн-заработке при старте
+  useEffect(() => {
+    if (initOfflineEarned > 0) {
+      setTimeout(() => {
+        showNotif(`Пока вас не было, заработано: +${formatMoney(initOfflineEarned)} 📦`);
+      }, 800);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Автосохранение каждые 5 секунд
