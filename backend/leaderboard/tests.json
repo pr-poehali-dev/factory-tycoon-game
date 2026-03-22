@@ -1,0 +1,27 @@
+{
+  "tests": [
+    {
+      "name": "GET leaderboard",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "expectedBody": { "players": [] },
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "POST update player",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "player_id": "user0000001",
+        "balance": 500,
+        "total_earned": 1000,
+        "buildings_count": 1,
+        "dispensers_count": 3
+      },
+      "expectedStatus": 200,
+      "expectedBody": { "ok": true },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ==================== ТИПЫ ====================
+interface LeaderEntry {
+  player_id: string;
+  balance: number;
+  total_earned: number;
+  buildings_count: number;
+  dispensers_count: number;
+}
+
 interface Dispenser {
   id: number;
   level: number;
@@ -66,6 +74,24 @@ function createDispenser(level: number): Dispenser {
 }
 
 const SAVE_KEY = "factory_tycoon_save";
+const PLAYER_ID_KEY = "factory_tycoon_player_id";
+const LEADERBOARD_URL = "https://functions.poehali.dev/87317d79-f61c-4431-959a-62534777e22f";
+
+function generatePlayerId(): string {
+  const num = Math.floor(Math.random() * 9_999_999) + 1;
+  return `user${String(num).padStart(7, "0")}`;
+}
+
+function getOrCreatePlayerId(): string {
+  let id = localStorage.getItem(PLAYER_ID_KEY);
+  if (!id) {
+    id = generatePlayerId();
+    localStorage.setItem(PLAYER_ID_KEY, id);
+  }
+  return id;
+}
+
+const PLAYER_ID = getOrCreatePlayerId();
 
 const defaultState: GameState = {
   balance: 0,
@@ -448,9 +474,11 @@ function Chest({ balance }: { balance: number }) {
 export default function Index() {
   const [game, setGame] = useState<GameState>(initState);
   const [selectedBuildingId, setSelectedBuildingId] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<"game" | "shop" | "upgrades" | "stats">("game");
+  const [activeTab, setActiveTab] = useState<"game" | "shop" | "upgrades" | "stats" | "leaders">("game");
   const [notification, setNotification] = useState<string | null>(null);
   const [balanceAnim, setBalanceAnim] = useState(false);
+  const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
+  const [leadersLoading, setLeadersLoading] = useState(false);
   const gameRef = useRef(game);
   gameRef.current = game;
 
@@ -491,6 +519,53 @@ export default function Index() {
     setSelectedBuildingId(1);
     showNotif("Игра сброшена. Начинаем заново!");
   }, [showNotif]);
+
+  // Отправка данных на лидерборд
+  const syncLeaderboard = useCallback(async (g: GameState) => {
+    const totalDisp = g.buildings.reduce((s, b) => s + b.dispensers.length, 0);
+    try {
+      await fetch(LEADERBOARD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          player_id: PLAYER_ID,
+          balance: Math.floor(g.balance),
+          total_earned: Math.floor(g.totalEarned),
+          buildings_count: g.buildings.length,
+          dispensers_count: totalDisp,
+        }),
+      });
+    } catch (e) {
+      console.warn("Leaderboard sync failed", e);
+    }
+  }, []);
+
+  // Загрузка лидерборда
+  const fetchLeaders = useCallback(async () => {
+    setLeadersLoading(true);
+    try {
+      const res = await fetch(LEADERBOARD_URL);
+      const data = await res.json();
+      const parsed = typeof data === "string" ? JSON.parse(data) : data;
+      setLeaders(parsed.players ?? []);
+    } catch (e) {
+      console.warn("Fetch leaders failed", e);
+    } finally {
+      setLeadersLoading(false);
+    }
+  }, []);
+
+  // Синхронизация с лидербордом каждые 30 секунд
+  useEffect(() => {
+    syncLeaderboard(gameRef.current);
+    const interval = setInterval(() => syncLeaderboard(gameRef.current), 30000);
+    return () => clearInterval(interval);
+  }, [syncLeaderboard]);
+
+  // Загружаем лидеров при открытии вкладки
+  useEffect(() => {
+    if (activeTab === "leaders") fetchLeaders();
+  }, [activeTab, fetchLeaders]);
 
   // Игровой цикл
   useEffect(() => {
@@ -602,6 +677,12 @@ export default function Index() {
             <div className="text-[9px] font-mono tracking-widest" style={{ color: "#4a5068" }}>
               ПРОМЫШЛЕННАЯ ИМПЕРИЯ
             </div>
+            <div
+              className="text-[10px] font-mono mt-0.5 px-1.5 py-0.5 rounded inline-block"
+              style={{ color: "#22c55e", background: "#0a1a0a", border: "1px solid #22c55e22" }}
+            >
+              👤 {PLAYER_ID}
+            </div>
           </div>
         </div>
 
@@ -658,6 +739,7 @@ export default function Index() {
           { key: "shop", label: "🛒 МАГАЗИН" },
           { key: "upgrades", label: "⚡ УЛУЧШЕНИЯ" },
           { key: "stats", label: "📊 СТАТИСТИКА" },
+          { key: "leaders", label: "🏆 ЛИДЕРЫ" },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -1027,6 +1109,103 @@ export default function Index() {
                   })}
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+        {/* ВКЛАДКА: ЛИДЕРЫ */}
+        {activeTab === "leaders" && (
+          <div className="flex-1 overflow-auto p-6">
+            <div style={{ maxWidth: 700, margin: "0 auto" }}>
+              <div className="flex items-center justify-between mb-5">
+                <div className="font-oswald text-base uppercase tracking-widest" style={{ color: "#f59e0b" }}>
+                  🏆 Таблица лидеров
+                </div>
+                <button
+                  onClick={fetchLeaders}
+                  disabled={leadersLoading}
+                  className="px-3 py-1.5 rounded font-oswald text-[10px] uppercase tracking-widest transition-all hover:scale-105 disabled:opacity-40"
+                  style={{ background: "#1a1c2e", color: "#6b7280", border: "1px solid #2a2d40" }}
+                >
+                  {leadersLoading ? "Загрузка..." : "🔄 Обновить"}
+                </button>
+              </div>
+
+              {/* Моя позиция */}
+              <div className="rounded p-3 mb-4 flex items-center gap-4" style={{ background: "#1a1408", border: "1.5px solid #f59e0b44" }}>
+                <div className="font-oswald text-xs uppercase tracking-widest" style={{ color: "#92600a" }}>Вы:</div>
+                <div className="text-[11px] font-mono" style={{ color: "#22c55e" }}>{PLAYER_ID}</div>
+                <div className="flex gap-4 ml-auto text-[10px] font-mono">
+                  <span style={{ color: "#f59e0b" }}>💰 {formatMoney(game.balance)}</span>
+                  <span style={{ color: "#3b82f6" }}>🏭 {game.buildings.length}</span>
+                  <span style={{ color: "#a855f7" }}>⚙ {totalDispensers}</span>
+                </div>
+              </div>
+
+              {/* Таблица */}
+              {leadersLoading ? (
+                <div className="text-center py-16 font-mono text-sm" style={{ color: "#4a5068" }}>
+                  Загружаем данные...
+                </div>
+              ) : leaders.length === 0 ? (
+                <div className="text-center py-16 font-mono text-sm" style={{ color: "#4a5068" }}>
+                  Пока никого нет. Вы первый!
+                </div>
+              ) : (
+                <div className="rounded overflow-hidden" style={{ border: "1px solid #1e2030" }}>
+                  {/* Шапка */}
+                  <div
+                    className="grid text-[9px] font-oswald uppercase tracking-widest px-4 py-2"
+                    style={{
+                      background: "#0d0e16",
+                      borderBottom: "1px solid #1e2030",
+                      color: "#4a5068",
+                      gridTemplateColumns: "40px 1fr 120px 80px 100px 80px",
+                    }}
+                  >
+                    <div>#</div>
+                    <div>Игрок</div>
+                    <div className="text-right">Всего заработано</div>
+                    <div className="text-right">Заводы</div>
+                    <div className="text-right">Раздатчики</div>
+                    <div className="text-right">Баланс</div>
+                  </div>
+                  {leaders.map((entry, i) => {
+                    const isMe = entry.player_id === PLAYER_ID;
+                    const medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : null;
+                    return (
+                      <div
+                        key={entry.player_id}
+                        className="grid px-4 py-2.5 transition-all"
+                        style={{
+                          gridTemplateColumns: "40px 1fr 120px 80px 100px 80px",
+                          background: isMe ? "#1a1408" : i % 2 === 0 ? "#0d0e16" : "#0a0b12",
+                          borderBottom: "1px solid #141520",
+                          borderLeft: isMe ? "2px solid #f59e0b" : "2px solid transparent",
+                        }}
+                      >
+                        <div className="font-oswald text-xs" style={{ color: i < 3 ? "#f59e0b" : "#4a5068" }}>
+                          {medal ?? `${i + 1}`}
+                        </div>
+                        <div className="font-mono text-[11px]" style={{ color: isMe ? "#22c55e" : "#c9c8c0" }}>
+                          {entry.player_id}{isMe && <span className="ml-1 text-[9px]" style={{ color: "#f59e0b66" }}>(вы)</span>}
+                        </div>
+                        <div className="text-right font-mono text-[10px]" style={{ color: "#f59e0b" }}>
+                          {formatMoney(entry.total_earned)}
+                        </div>
+                        <div className="text-right font-mono text-[10px]" style={{ color: "#3b82f6" }}>
+                          {entry.buildings_count}
+                        </div>
+                        <div className="text-right font-mono text-[10px]" style={{ color: "#a855f7" }}>
+                          {entry.dispensers_count}
+                        </div>
+                        <div className="text-right font-mono text-[10px]" style={{ color: "#c9c8c0" }}>
+                          {formatMoney(entry.balance)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         )}
